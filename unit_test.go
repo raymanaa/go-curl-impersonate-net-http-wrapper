@@ -12,8 +12,8 @@ func TestNewClient(t *testing.T) {
 	if client == nil {
 		t.Fatal("NewClient() returned nil")
 	}
-	if client.Client == nil {
-		t.Fatal("NewClient() created client with nil http.Client")
+	if client.Transport == nil {
+		t.Fatal("NewClient() created client with nil Transport")
 	}
 	if client.Timeout != 30*time.Second {
 		t.Errorf("Expected timeout 30s, got %v", client.Timeout)
@@ -85,8 +85,8 @@ func TestDefaultClient(t *testing.T) {
 	if DefaultClient == nil {
 		t.Fatal("DefaultClient is nil")
 	}
-	if DefaultClient.Client == nil {
-		t.Fatal("DefaultClient.Client is nil")
+	if DefaultClient.Transport == nil {
+		t.Fatal("DefaultClient.Transport is nil")
 	}
 	if DefaultClient.Timeout != 30*time.Second {
 		t.Errorf("Expected DefaultClient timeout 30s, got %v", DefaultClient.Timeout)

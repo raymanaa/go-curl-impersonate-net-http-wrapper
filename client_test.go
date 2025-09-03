@@ -2,8 +2,10 @@ package curlhttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,6 +21,71 @@ type HttpbinResponse struct {
 	Form    map[string]string `json:"form,omitempty"`
 	Files   map[string]string `json:"files,omitempty"`
 	JSON    interface{}       `json:"json,omitempty"`
+}
+
+// createMockServer creates a test HTTP server for scale and load testing
+func createMockServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/get":
+			// Handle GET requests
+			w.Header().Set("Content-Type", "application/json")
+			id := r.URL.Query().Get("id")
+			response := map[string]interface{}{
+				"args": r.URL.Query(),
+				"headers": func() map[string]string {
+					headers := make(map[string]string)
+					for k, v := range r.Header {
+						if len(v) > 0 {
+							headers[k] = v[0]
+						}
+					}
+					return headers
+				}(),
+				"origin": r.RemoteAddr,
+				"url":    fmt.Sprintf("%s%s", "http://"+r.Host, r.RequestURI),
+				"method": r.Method,
+				"id":     id,
+			}
+			json.NewEncoder(w).Encode(response)
+
+		case "/post":
+			// Handle POST requests
+			w.Header().Set("Content-Type", "application/json")
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Failed to read body", http.StatusInternalServerError)
+				return
+			}
+			response := map[string]interface{}{
+				"args": r.URL.Query(),
+				"headers": func() map[string]string {
+					headers := make(map[string]string)
+					for k, v := range r.Header {
+						if len(v) > 0 {
+							headers[k] = v[0]
+						}
+					}
+					return headers
+				}(),
+				"origin": r.RemoteAddr,
+				"url":    fmt.Sprintf("%s%s", "http://"+r.Host, r.RequestURI),
+				"method": r.Method,
+				"data":   string(body),
+			}
+			json.NewEncoder(w).Encode(response)
+
+		default:
+			// Handle other requests
+			w.Header().Set("Content-Type", "application/json")
+			response := map[string]interface{}{
+				"method": r.Method,
+				"path":   r.URL.Path,
+				"status": "ok",
+			}
+			json.NewEncoder(w).Encode(response)
+		}
+	}))
 }
 
 // TestGetRequest tests that GET requests work with both clients
