@@ -466,7 +466,7 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	}
 
 	// Get response code
-	responseCodeInfo, err := easy.Getinfo(uint32(curl.INFO_HTTP_CODE))
+	responseCodeInfo, err := easy.Getinfo(uint32(curl.CURLINFO_RESPONSE_CODE))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get response code: %w", err)
 	}
