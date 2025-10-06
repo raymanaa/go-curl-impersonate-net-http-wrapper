@@ -8,7 +8,7 @@ import (
 	"time"
 
 	// Perfect drop-in replacement - literally just swap the import!
-	http "github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper"
+	http "github.com/dstockton/go-curl-impersonate-net-http-wrapper"
 	// http "net/http"  // <- Comment out this line and uncomment the line above
 )
 

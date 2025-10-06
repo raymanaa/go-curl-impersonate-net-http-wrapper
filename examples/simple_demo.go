@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	// This is how you use the wrapper - just import it like net/http!
-	http "github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper"
+	http "github.com/dstockton/go-curl-impersonate-net-http-wrapper"
 	// http "net/http"  // <- You can literally swap this line!
 )
 

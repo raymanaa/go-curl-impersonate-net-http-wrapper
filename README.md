@@ -1,8 +1,8 @@
 # Go Curl Impersonate Net/HTTP Wrapper
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper.svg)](https://pkg.go.dev/github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper)
-[![Go Report Card](https://goreportcard.com/badge/github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper)](https://goreportcard.com/report/github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper)
-[![CI](https://github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper/workflows/CI/badge.svg)](https://github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/dstockton/go-curl-impersonate-net-http-wrapper.svg)](https://pkg.go.dev/github.com/dstockton/go-curl-impersonate-net-http-wrapper)
+[![Go Report Card](https://goreportcard.com/badge/github.com/dstockton/go-curl-impersonate-net-http-wrapper)](https://goreportcard.com/report/github.com/dstockton/go-curl-impersonate-net-http-wrapper)
+[![CI](https://github.com/dstockton/go-curl-impersonate-net-http-wrapper/workflows/CI/badge.svg)](https://github.com/dstockton/go-curl-impersonate-net-http-wrapper/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A simple Go wrapper around [BridgeSenseDev/go-curl-impersonate](https://github.com/BridgeSenseDev/go-curl-impersonate) that provides a **true drop-in replacement** for `net/http` with browser impersonation.
@@ -16,7 +16,7 @@ A simple Go wrapper around [BridgeSenseDev/go-curl-impersonate](https://github.c
 import "net/http"
 
 // After:  
-import http "github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper"
+import http "github.com/dstockton/go-curl-impersonate-net-http-wrapper"
 ```
 
 **That's it!** Your existing code works unchanged with browser impersonation.
@@ -37,7 +37,7 @@ import http "github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper"
 ```go
 package main
 
-import http "github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper"
+import http "github.com/dstockton/go-curl-impersonate-net-http-wrapper"
 
 func main() {
     // These work exactly like net/http - no changes needed!
@@ -55,7 +55,7 @@ func main() {
 ```go
 package main
 
-import http "github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper"
+import http "github.com/dstockton/go-curl-impersonate-net-http-wrapper"
 
 func main() {
     // Standard http.Client usage - no changes needed!
@@ -74,7 +74,7 @@ package main
 
 import (
     "net/http"
-    curlhttp "github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper"
+    curlhttp "github.com/dstockton/go-curl-impersonate-net-http-wrapper"
 )
 
 func main() {
@@ -108,7 +108,7 @@ brew install curl
 
 ### Install the Package
 ```bash
-go get github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper
+go get github.com/dstockton/go-curl-impersonate-net-http-wrapper
 ```
 
 ## How It Works
@@ -218,7 +218,7 @@ Contributions are welcome! Please:
 
 ```bash
 # Clone the repository
-git clone https://github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper.git
+git clone https://github.com/dstockton/go-curl-impersonate-net-http-wrapper.git
 cd go-curl-impersonate-net-http-wrapper
 
 # Install dependencies

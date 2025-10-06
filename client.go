@@ -9,7 +9,7 @@
 // Example usage:
 //
 //	// Instead of: import "net/http"
-//	import http "github.com/BridgeSenseDev/go-curl-impersonate-net-http-wrapper"
+//	import http "github.com/dstockton/go-curl-impersonate-net-http-wrapper"
 //
 //	// All your existing net/http code works unchanged!
 //	resp, err := http.Get("https://example.com")
