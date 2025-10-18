@@ -255,6 +255,10 @@ type Transport struct {
 	// Supported targets: chrome136, firefox102, safari17_0, edge122
 	ImpersonateTarget string
 
+	// Proxy specifies a function to return a proxy for a given
+	// Request. a verbatim copy from the net/http.Transport struct definition
+	Proxy *url.URL
+
 	// UseDefaultHeaders whether to use default headers for the impersonated browser.
 	UseDefaultHeaders bool
 
@@ -262,13 +266,23 @@ type Transport struct {
 	curlHandles chan *curl.CURL
 	maxPoolSize int
 	poolOnce    sync.Once
+
+	// Connection pool settings
+	MaxConnects       int
+	MaxAgeConn        int
+	MaxLifetimeConn   int
+	ConnectTimeoutMs  int
+	TimeoutMs         int
+	DNSCacheTimeout   int
+	BufferSize        int
+	EnableTCPFastOpen bool
 }
 
 // initPool initializes the connection pool for the transport
 func (t *Transport) initPool() {
 	t.poolOnce.Do(func() {
 		if t.maxPoolSize == 0 {
-			t.maxPoolSize = 10 // Default pool size
+			t.maxPoolSize = 200 // Default pool size
 		}
 		t.curlHandles = make(chan *curl.CURL, t.maxPoolSize)
 	})
@@ -289,22 +303,77 @@ func (t *Transport) getCurlHandle() *curl.CURL {
 			return nil
 		}
 
-		// Set up persistent options for performance
-		easy.Setopt(curl.OPT_HEADER, true)
-		easy.Setopt(curl.OPT_NOPROGRESS, true)
-		if t.ImpersonateTarget == "" {
-			t.ImpersonateTarget = "chrome136" // Default target
-		}
-		easy.Impersonate(t.ImpersonateTarget, t.UseDefaultHeaders)
-
-		// Enable connection reuse and keep-alive for better performance
-		easy.Setopt(curl.OPT_FRESH_CONNECT, false)
-		easy.Setopt(curl.OPT_FORBID_REUSE, false)
-		easy.Setopt(curl.OPT_TCP_KEEPALIVE, true)
-		easy.Setopt(curl.OPT_TCP_KEEPIDLE, 60)
-		easy.Setopt(curl.OPT_TCP_KEEPINTVL, 60)
+		// Apply configuration
+		t.configureCurlHandle(easy)
 
 		return easy
+	}
+}
+
+// configureCurlHandle applies all settings to a curl handle
+func (t *Transport) configureCurlHandle(handle *curl.CURL) {
+	// Set defaults if not specified
+	if t.ImpersonateTarget == "" {
+		t.ImpersonateTarget = "chrome136"
+	}
+	if t.MaxConnects == 0 {
+		t.MaxConnects = 50 // Conservative default for library
+	}
+	if t.MaxAgeConn == 0 {
+		t.MaxAgeConn = 300
+	}
+	if t.MaxLifetimeConn == 0 {
+		t.MaxLifetimeConn = 600
+	}
+	if t.ConnectTimeoutMs == 0 {
+		t.ConnectTimeoutMs = 5000 // Conservative 5s default
+	}
+	if t.TimeoutMs == 0 {
+		t.TimeoutMs = 30000 // Conservative 30s default
+	}
+	if t.DNSCacheTimeout == 0 {
+		t.DNSCacheTimeout = 300
+	}
+	if t.BufferSize == 0 {
+		t.BufferSize = 16384 // Conservative 16KB default
+	}
+
+	// Basic options
+	handle.Setopt(curl.OPT_HEADER, false)
+	handle.Setopt(curl.OPT_NOPROGRESS, true)
+	handle.Impersonate(t.ImpersonateTarget, t.UseDefaultHeaders)
+
+	// Connection reuse and persistence
+	handle.Setopt(curl.OPT_FRESH_CONNECT, false)
+	handle.Setopt(curl.OPT_FORBID_REUSE, false)
+	handle.Setopt(curl.OPT_TCP_KEEPALIVE, true)
+	handle.Setopt(curl.OPT_TCP_KEEPIDLE, 60)
+	handle.Setopt(curl.OPT_TCP_KEEPINTVL, 60)
+
+	// Connection pool settings
+	handle.Setopt(curl.OPT_MAXCONNECTS, t.MaxConnects)
+	handle.Setopt(curl.OPT_MAXAGE_CONN, t.MaxAgeConn)
+	handle.Setopt(curl.OPT_MAXLIFETIME_CONN, t.MaxLifetimeConn)
+
+	// Timeout settings
+	handle.Setopt(curl.OPT_CONNECTTIMEOUT_MS, t.ConnectTimeoutMs)
+	handle.Setopt(curl.OPT_TIMEOUT_MS, t.TimeoutMs)
+	handle.Setopt(curl.OPT_DNS_CACHE_TIMEOUT, t.DNSCacheTimeout)
+
+	// TCP optimizations
+	handle.Setopt(curl.OPT_TCP_NODELAY, true)
+	if t.EnableTCPFastOpen {
+		handle.Setopt(curl.OPT_TCP_FASTOPEN, true)
+	}
+
+	// Performance optimizations
+	handle.Setopt(curl.OPT_NOSIGNAL, true)
+	handle.Setopt(curl.OPT_BUFFERSIZE, t.BufferSize)
+
+	// Proxy SSL settings
+	if t.Proxy != nil {
+		handle.Setopt(curl.OPT_PROXY_SSL_VERIFYPEER, false)
+		handle.Setopt(curl.OPT_PROXY_SSL_VERIFYHOST, false)
 	}
 }
 
@@ -317,15 +386,8 @@ func (t *Transport) returnCurlHandle(handle *curl.CURL) {
 	// Reset handle for reuse (but keep connection alive)
 	handle.Reset()
 
-	// Set up persistent options again after reset
-	handle.Setopt(curl.OPT_HEADER, true)
-	handle.Setopt(curl.OPT_NOPROGRESS, true)
-	handle.Impersonate(t.ImpersonateTarget, t.UseDefaultHeaders)
-	handle.Setopt(curl.OPT_FRESH_CONNECT, false)
-	handle.Setopt(curl.OPT_FORBID_REUSE, false)
-	handle.Setopt(curl.OPT_TCP_KEEPALIVE, true)
-	handle.Setopt(curl.OPT_TCP_KEEPIDLE, 60)
-	handle.Setopt(curl.OPT_TCP_KEEPINTVL, 60)
+	// Reconfigure handle after reset
+	t.configureCurlHandle(handle)
 
 	select {
 	case t.curlHandles <- handle:
@@ -341,8 +403,23 @@ func NewTransport() *Transport {
 	return &Transport{
 		ImpersonateTarget: "chrome136",
 		UseDefaultHeaders: true,
-		maxPoolSize:       10, // Default pool size
+		maxPoolSize:       10,
+		MaxConnects:       50,
+		MaxAgeConn:        300,
+		MaxLifetimeConn:   600,
+		ConnectTimeoutMs:  5000,
+		TimeoutMs:         30000,
+		DNSCacheTimeout:   300,
+		BufferSize:        16384,
+		EnableTCPFastOpen: false,
 	}
+}
+
+// NewTransportWithPoolSize creates a new Transport with a custom pool size
+func NewTransportWithPoolSize(poolSize int) *Transport {
+	t := NewTransport()
+	t.maxPoolSize = poolSize
+	return t
 }
 
 // RoundTrip executes a single HTTP transaction using go-curl-impersonate.
@@ -395,6 +472,14 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	}
 	defer t.returnCurlHandle(easy)
 
+	// Reset only request-specific options, not connection settings
+	easy.Setopt(curl.OPT_HTTPGET, false)
+	easy.Setopt(curl.OPT_NOBODY, false)
+	easy.Setopt(curl.OPT_POST, false)
+	easy.Setopt(curl.OPT_UPLOAD, false)
+	easy.Setopt(curl.OPT_CUSTOMREQUEST, nil)
+	easy.Setopt(curl.OPT_POSTFIELDS, nil)
+
 	// Set the URL
 	if err := easy.Setopt(curl.OPT_URL, url); err != nil {
 		return nil, fmt.Errorf("failed to set URL: %w", err)
@@ -403,7 +488,9 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	// Set HTTP method
 	switch method {
 	case "GET":
-		// GET is the default
+		if err := easy.Setopt(curl.OPT_HTTPGET, true); err != nil {
+			return nil, fmt.Errorf("failed to set GET method: %w", err)
+		}
 	case "HEAD":
 		if err := easy.Setopt(curl.OPT_NOBODY, true); err != nil {
 			return nil, fmt.Errorf("failed to set HEAD method: %w", err)
@@ -415,6 +502,10 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 		if len(body) > 0 {
 			if err := easy.Setopt(curl.OPT_POSTFIELDS, body); err != nil {
 				return nil, fmt.Errorf("failed to set request body: %w", err)
+			}
+			// **NEW: Set content length for POST**
+			if err := easy.Setopt(curl.OPT_POSTFIELDSIZE, len(body)); err != nil {
+				return nil, fmt.Errorf("failed to set post field size: %w", err)
 			}
 		}
 	case "PUT":
@@ -437,11 +528,15 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	}
 
 	// Set headers
+	var requestHeaders []string
 	if len(headers) > 0 {
-		var requestHeaders []string
 		for name, value := range headers {
 			requestHeaders = append(requestHeaders, fmt.Sprintf("%s: %s", name, value))
 		}
+	}
+
+	// Set all headers at once
+	if len(requestHeaders) > 0 {
 		if err := easy.Setopt(curl.OPT_HTTPHEADER, requestHeaders); err != nil {
 			return nil, fmt.Errorf("failed to set headers: %w", err)
 		}
@@ -460,38 +555,57 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 		return nil, fmt.Errorf("failed to set write data: %w", err)
 	}
 
+	// Set proxy if provided
+	if t.Proxy != nil {
+		// Set the proxy URL
+		if err := easy.Setopt(curl.OPT_PROXY, t.Proxy.String()); err != nil {
+			return nil, fmt.Errorf("failed to set proxy: %w", err)
+		}
+	}
+
 	// Perform the request
 	if err := easy.Perform(); err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	// Get response code
-	responseCodeInfo, err := easy.Getinfo(uint32(curl.CURLINFO_RESPONSE_CODE))
+	responseCodeInfo, err := easy.Getinfo(curl.INFO_RESPONSE_CODE)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get response code: %w", err)
 	}
 	responseCode := int(responseCodeInfo.(int64))
 
-	// Get the combined response (headers + body) from buffer
-	combinedData := responseBuffer.Bytes()
+	// Get response body from buffer
+	responseBodyData := responseBuffer.Bytes()
 
-	// Split headers and body - they are separated by double CRLF
-	combinedStr := string(combinedData)
-	parts := strings.SplitN(combinedStr, "\r\n\r\n", 2)
-	if len(parts) < 2 {
-		// Try with just \n\n as fallback
-		parts = strings.SplitN(combinedStr, "\n\n", 2)
-		if len(parts) < 2 {
-			return nil, fmt.Errorf("failed to separate headers and body in response")
+	// Create basic response headers using curl's built-in info
+	responseHeaders := make(http.Header)
+
+	// Get Content-Type from curl
+	if contentType, err := easy.Getinfo(curl.INFO_CONTENT_TYPE); err == nil && contentType != nil {
+		if ct, ok := contentType.(string); ok && ct != "" {
+			responseHeaders.Set("Content-Type", ct)
 		}
 	}
 
-	headerStr := parts[0]
-	bodyStr := parts[1]
+	// Set default Content-Type if not available
+	if responseHeaders.Get("Content-Type") == "" {
+		responseHeaders.Set("Content-Type", "application/json")
+	}
 
-	// Parse headers
-	responseHeaders := parseHeaders(headerStr)
-	responseBodyData := []byte(bodyStr)
+	// Get cookies from curl's cookie list
+	if cookieList, err := easy.Getinfo(curl.INFO_COOKIELIST); err == nil && cookieList != nil {
+		if cookies, ok := cookieList.([]string); ok {
+			for _, cookie := range cookies {
+				parts := strings.Split(cookie, "\t")
+				if len(parts) >= 7 {
+					name := parts[5]
+					value := parts[6]
+					responseHeaders.Add("Set-Cookie", fmt.Sprintf("%s=%s", name, value))
+				}
+			}
+		}
+	}
 
 	// Create http.Response
 	resp := &http.Response{
@@ -506,34 +620,6 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	}
 
 	return resp, nil
-}
-
-// parseHeaders parses raw HTTP headers into http.Header
-func parseHeaders(headerData string) http.Header {
-	headers := make(http.Header)
-	lines := strings.Split(headerData, "\n")
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Skip the status line (HTTP/1.1 200 OK)
-		if strings.HasPrefix(line, "HTTP/") {
-			continue
-		}
-
-		// Parse header line (name: value)
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) == 2 {
-			name := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			headers.Add(name, value)
-		}
-	}
-
-	return headers
 }
 
 // Client wraps http.Client to use our custom Transport that provides
