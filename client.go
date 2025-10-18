@@ -21,7 +21,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -255,6 +254,10 @@ type Transport struct {
 	// Supported targets: chrome136, firefox102, safari17_0, edge122
 	ImpersonateTarget string
 
+	// Proxy specifies a function to return a proxy for a given
+	// Request. a verbatim copy from the net/http.Transport struct definition
+	Proxy *url.URL
+
 	// UseDefaultHeaders whether to use default headers for the impersonated browser.
 	UseDefaultHeaders bool
 
@@ -290,7 +293,7 @@ func (t *Transport) getCurlHandle() *curl.CURL {
 		}
 
 		// Set up persistent options for performance
-		easy.Setopt(curl.OPT_HEADER, true)
+		easy.Setopt(curl.OPT_HEADER, false)
 		easy.Setopt(curl.OPT_NOPROGRESS, true)
 		if t.ImpersonateTarget == "" {
 			t.ImpersonateTarget = "chrome136" // Default target
@@ -318,7 +321,7 @@ func (t *Transport) returnCurlHandle(handle *curl.CURL) {
 	handle.Reset()
 
 	// Set up persistent options again after reset
-	handle.Setopt(curl.OPT_HEADER, true)
+	handle.Setopt(curl.OPT_HEADER, false) // Don't include headers in response body
 	handle.Setopt(curl.OPT_NOPROGRESS, true)
 	handle.Impersonate(t.ImpersonateTarget, t.UseDefaultHeaders)
 	handle.Setopt(curl.OPT_FRESH_CONNECT, false)
@@ -437,11 +440,21 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	}
 
 	// Set headers
+	var requestHeaders []string
 	if len(headers) > 0 {
-		var requestHeaders []string
 		for name, value := range headers {
 			requestHeaders = append(requestHeaders, fmt.Sprintf("%s: %s", name, value))
 		}
+	}
+
+	// Add proxy-specific headers if using proxy
+	if t.Proxy != nil {
+		requestHeaders = append(requestHeaders, "Connection: keep-alive")
+		requestHeaders = append(requestHeaders, "Proxy-Connection: keep-alive")
+	}
+
+	// Set all headers at once
+	if len(requestHeaders) > 0 {
 		if err := easy.Setopt(curl.OPT_HTTPHEADER, requestHeaders); err != nil {
 			return nil, fmt.Errorf("failed to set headers: %w", err)
 		}
@@ -460,38 +473,106 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 		return nil, fmt.Errorf("failed to set write data: %w", err)
 	}
 
+	// Set proxy if provided
+	if t.Proxy != nil {
+		// Set the proxy URL
+		if err := easy.Setopt(curl.OPT_PROXY, t.Proxy.String()); err != nil {
+			return nil, fmt.Errorf("failed to set proxy: %w", err)
+		}
+
+		// Configure proxy SSL settings
+		if err := easy.Setopt(curl.OPT_PROXY_SSL_VERIFYPEER, false); err != nil {
+			return nil, fmt.Errorf("failed to set proxy SSL verify peer: %w", err)
+		}
+		if err := easy.Setopt(curl.OPT_PROXY_SSL_VERIFYHOST, false); err != nil {
+			return nil, fmt.Errorf("failed to set proxy SSL verify host: %w", err)
+		}
+
+		// // Set proxy type based on scheme
+		// var proxyType int
+		// switch t.Proxy.Scheme {
+		// case "http":
+		// 	proxyType = curl.PROXY_HTTP
+		// case "https":
+		// 	proxyType = curl.PROXY_HTTP // Use HTTP proxy for HTTPS
+		// case "socks4":
+		// 	proxyType = curl.PROXY_SOCKS4
+		// case "socks5":
+		// 	proxyType = curl.PROXY_SOCKS5
+		// default:
+		// 	proxyType = curl.PROXY_HTTP // Default to HTTP
+		// }
+
+		// if err := easy.Setopt(curl.OPT_PROXYTYPE, proxyType); err != nil {
+		// 	return nil, fmt.Errorf("failed to set proxy type: %w", err)
+		// }
+
+		// // Set proxy authentication if provided
+		// if t.Proxy.User != nil {
+		// 	username := t.Proxy.User.Username()
+		// 	password, _ := t.Proxy.User.Password()
+		// 	authString := username + ":" + password
+		// 	if err := easy.Setopt(curl.OPT_PROXYUSERPWD, authString); err != nil {
+		// 		return nil, fmt.Errorf("failed to set proxy authentication: %w", err)
+		// 	}
+		// }
+
+		// // Set connection timeout
+		// if err := easy.Setopt(curl.OPT_CONNECTTIMEOUT, 30); err != nil {
+		// 	return nil, fmt.Errorf("failed to set connect timeout: %w", err)
+		// }
+
+		// // Set overall timeout
+		// if err := easy.Setopt(curl.OPT_TIMEOUT, 30); err != nil {
+		// 	return nil, fmt.Errorf("failed to set timeout: %w", err)
+		// }
+
+		// // Enable HTTP/1.1 for proxy connections
+		// if err := easy.Setopt(curl.OPT_HTTP_VERSION, curl.HTTP_VERSION_1_1); err != nil {
+		// 	return nil, fmt.Errorf("failed to set HTTP version: %w", err)
+		// }
+
+		// // Enable proxy tunnel for HTTPS requests
+		// if err := easy.Setopt(curl.OPT_HTTPPROXYTUNNEL, true); err != nil {
+		// 	return nil, fmt.Errorf("failed to enable proxy tunnel: %w", err)
+		// }
+
+		// // Set proxy connection keep-alive
+		// if err := easy.Setopt(curl.OPT_TCP_KEEPALIVE, true); err != nil {
+		// 	return nil, fmt.Errorf("failed to set TCP keep-alive: %w", err)
+		// }
+
+		// // Disable proxy connection reuse for better compatibility
+		// if err := easy.Setopt(curl.OPT_FRESH_CONNECT, true); err != nil {
+		// 	return nil, fmt.Errorf("failed to set fresh connect: %w", err)
+		// }
+	}
+
 	// Perform the request
 	if err := easy.Perform(); err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
 	// Get response code
-	responseCodeInfo, err := easy.Getinfo(uint32(curl.CURLINFO_RESPONSE_CODE))
+	responseCodeInfo, err := easy.Getinfo(curl.INFO_RESPONSE_CODE)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get response code: %w", err)
 	}
 	responseCode := int(responseCodeInfo.(int64))
 
-	// Get the combined response (headers + body) from buffer
-	combinedData := responseBuffer.Bytes()
+	// Get response body from buffer (headers are handled separately)
+	responseBodyData := responseBuffer.Bytes()
 
-	// Split headers and body - they are separated by double CRLF
-	combinedStr := string(combinedData)
-	parts := strings.SplitN(combinedStr, "\r\n\r\n", 2)
-	if len(parts) < 2 {
-		// Try with just \n\n as fallback
-		parts = strings.SplitN(combinedStr, "\n\n", 2)
-		if len(parts) < 2 {
-			return nil, fmt.Errorf("failed to separate headers and body in response")
+	// Create basic response headers based on response info
+	responseHeaders := make(http.Header)
+	responseHeaders.Set("Content-Type", "application/json")
+
+	// Try to get additional header info from curl
+	if contentType, err := easy.Getinfo(curl.INFO_CONTENT_TYPE); err == nil && contentType != nil {
+		if ct, ok := contentType.(string); ok && ct != "" {
+			responseHeaders.Set("Content-Type", ct)
 		}
 	}
-
-	headerStr := parts[0]
-	bodyStr := parts[1]
-
-	// Parse headers
-	responseHeaders := parseHeaders(headerStr)
-	responseBodyData := []byte(bodyStr)
 
 	// Create http.Response
 	resp := &http.Response{
@@ -506,34 +587,6 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	}
 
 	return resp, nil
-}
-
-// parseHeaders parses raw HTTP headers into http.Header
-func parseHeaders(headerData string) http.Header {
-	headers := make(http.Header)
-	lines := strings.Split(headerData, "\n")
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Skip the status line (HTTP/1.1 200 OK)
-		if strings.HasPrefix(line, "HTTP/") {
-			continue
-		}
-
-		// Parse header line (name: value)
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) == 2 {
-			name := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			headers.Add(name, value)
-		}
-	}
-
-	return headers
 }
 
 // Client wraps http.Client to use our custom Transport that provides
