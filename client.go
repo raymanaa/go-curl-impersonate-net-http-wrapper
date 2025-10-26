@@ -473,12 +473,8 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	defer t.returnCurlHandle(easy)
 
 	// Reset only request-specific options, not connection settings
-	easy.Setopt(curl.OPT_HTTPGET, false)
-	easy.Setopt(curl.OPT_NOBODY, false)
-	easy.Setopt(curl.OPT_POST, false)
-	easy.Setopt(curl.OPT_UPLOAD, false)
-	easy.Setopt(curl.OPT_CUSTOMREQUEST, nil)
-	easy.Setopt(curl.OPT_POSTFIELDS, nil)
+	easy.Reset()
+	t.configureCurlHandle(easy)
 
 	// Set the URL
 	if err := easy.Setopt(curl.OPT_URL, url); err != nil {
@@ -503,7 +499,6 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 			if err := easy.Setopt(curl.OPT_POSTFIELDS, body); err != nil {
 				return nil, fmt.Errorf("failed to set request body: %w", err)
 			}
-			// **NEW: Set content length for POST**
 			if err := easy.Setopt(curl.OPT_POSTFIELDSIZE, len(body)); err != nil {
 				return nil, fmt.Errorf("failed to set post field size: %w", err)
 			}
