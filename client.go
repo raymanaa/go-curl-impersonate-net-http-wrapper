@@ -343,6 +343,11 @@ func (t *Transport) configureCurlHandle(handle *curl.CURL) {
 	handle.Setopt(curl.OPT_NOPROGRESS, true)
 	handle.Impersonate(t.ImpersonateTarget, t.UseDefaultHeaders)
 
+	// disable SSL verification
+	handle.Setopt(curl.OPT_SSL_VERIFYPEER, false)
+	handle.Setopt(curl.OPT_SSL_VERIFYHOST, false)
+	handle.Setopt(curl.OPT_SSL_VERIFYSTATUS, false)
+
 	// Connection reuse and persistence
 	handle.Setopt(curl.OPT_FRESH_CONNECT, false)
 	handle.Setopt(curl.OPT_FORBID_REUSE, false)
