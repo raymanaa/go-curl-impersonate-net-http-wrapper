@@ -246,6 +246,31 @@ func writeDataToBuffer(ptr []byte, userdata interface{}) bool {
 	return err == nil
 }
 
+// writeHeaderToMap is the callback function for writing header data to a map
+func writeHeaderToMap(data []byte, userdata interface{}) bool {
+	headerMap, ok := userdata.(http.Header)
+	if !ok {
+		return false
+	}
+	line := string(data)
+
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return true
+	}
+
+	if strings.HasPrefix(line, "HTTP/") {
+		return true
+	}
+	parts := strings.SplitN(line, ":", 2)
+	if len(parts) == 2 {
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		headerMap.Add(key, value)
+	}
+	return true
+}
+
 // Transport implements http.RoundTripper interface using go-curl-impersonate.
 // It provides browser impersonation capabilities while maintaining full
 // compatibility with the standard http.RoundTripper interface.
@@ -563,6 +588,17 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 		}
 	}
 
+	// Create response headers map
+	responseHeaders := make(http.Header)
+
+	// Set header callback to capture response headers
+	if err := easy.Setopt(curl.OPT_HEADERFUNCTION, writeHeaderToMap); err != nil {
+		return nil, fmt.Errorf("failed to set header function: %w", err)
+	}
+	if err := easy.Setopt(curl.OPT_HEADERDATA, responseHeaders); err != nil {
+		return nil, fmt.Errorf("failed to set header data: %w", err)
+	}
+
 	// Perform the request
 	if err := easy.Perform(); err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -578,33 +614,18 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	// Get response body from buffer
 	responseBodyData := responseBuffer.Bytes()
 
-	// Create basic response headers using curl's built-in info
-	responseHeaders := make(http.Header)
-
-	// Get Content-Type from curl
-	if contentType, err := easy.Getinfo(curl.INFO_CONTENT_TYPE); err == nil && contentType != nil {
-		if ct, ok := contentType.(string); ok && ct != "" {
-			responseHeaders.Set("Content-Type", ct)
-		}
-	}
-
-	// Set default Content-Type if not available
+	// Get Content-Type from curl if not already captured
 	if responseHeaders.Get("Content-Type") == "" {
-		responseHeaders.Set("Content-Type", "application/json")
-	}
-
-	// Get cookies from curl's cookie list
-	if cookieList, err := easy.Getinfo(curl.INFO_COOKIELIST); err == nil && cookieList != nil {
-		if cookies, ok := cookieList.([]string); ok {
-			for _, cookie := range cookies {
-				parts := strings.Split(cookie, "\t")
-				if len(parts) >= 7 {
-					name := parts[5]
-					value := parts[6]
-					responseHeaders.Add("Set-Cookie", fmt.Sprintf("%s=%s", name, value))
-				}
+		if contentType, err := easy.Getinfo(curl.INFO_CONTENT_TYPE); err == nil && contentType != nil {
+			if ct, ok := contentType.(string); ok && ct != "" {
+				responseHeaders.Set("Content-Type", ct)
 			}
 		}
+	}
+
+	// Set default Content-Type if still not available
+	if responseHeaders.Get("Content-Type") == "" {
+		responseHeaders.Set("Content-Type", "application/json")
 	}
 
 	// Create http.Response
