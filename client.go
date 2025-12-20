@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -601,8 +602,16 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 
 	// Perform the request
 	if err := easy.Perform(); err != nil {
+
+		runtime.KeepAlive(body)
+		runtime.KeepAlive(responseBuffer)
+		runtime.KeepAlive(responseHeaders)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
+
+	runtime.KeepAlive(body)
+	runtime.KeepAlive(responseBuffer)
+	runtime.KeepAlive(responseHeaders)
 
 	// Get response code
 	responseCodeInfo, err := easy.Getinfo(curl.INFO_RESPONSE_CODE)
