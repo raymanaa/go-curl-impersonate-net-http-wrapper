@@ -503,10 +503,6 @@ func (t *Transport) performOptimizedRequest(url, method string, headers map[stri
 	}
 	defer t.returnCurlHandle(easy)
 
-	// Reset only request-specific options, not connection settings
-	easy.Reset()
-	t.configureCurlHandle(easy)
-
 	// Set the URL
 	if err := easy.Setopt(curl.OPT_URL, url); err != nil {
 		return nil, fmt.Errorf("failed to set URL: %w", err)
