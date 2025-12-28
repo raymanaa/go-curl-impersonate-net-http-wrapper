@@ -302,6 +302,13 @@ type Transport struct {
 	DNSCacheTimeout   int
 	BufferSize        int
 	EnableTCPFastOpen bool
+
+	// HttpVersion controls the HTTP version to use:
+	// 0 = default (let curl decide)
+	// 1 = HTTP/1.0
+	// 2 = HTTP/1.1 (forces HTTP/1.1, disables HTTP/2)
+	// 3 = HTTP/2
+	HttpVersion int
 }
 
 // initPool initializes the connection pool for the transport
@@ -405,6 +412,11 @@ func (t *Transport) configureCurlHandle(handle *curl.CURL) {
 	if t.Proxy != nil {
 		handle.Setopt(curl.OPT_PROXY_SSL_VERIFYPEER, false)
 		handle.Setopt(curl.OPT_PROXY_SSL_VERIFYHOST, false)
+	}
+
+	// HTTP version setting (0=default, 1=HTTP/1.0, 2=HTTP/1.1, 3=HTTP/2)
+	if t.HttpVersion > 0 {
+		handle.Setopt(curl.OPT_HTTP_VERSION, t.HttpVersion)
 	}
 }
 
